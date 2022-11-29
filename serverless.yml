@@ -138,6 +138,13 @@ functions:
       - websocket:
           route: $disconnect
 
+  SyncDynamoDBImagesELK:
+    handler: src/lambda/dynamoDb/elasticSearchSync.handler
+    events:
+      - stream:
+          type: dynamodb
+          arn: !GetAtt ImagesDynamoDBTable.StreamArn
+
 resources:
   Resources:
     # DynamoDB tables
@@ -177,6 +184,8 @@ resources:
               KeyType: HASH
             Projection:
               ProjectionType: ALL
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
 
     ConnectionDynamoDBTable:
       Type: AWS::DynamoDB::Table
@@ -248,3 +257,45 @@ resources:
         ValidateRequestBody: true
         ValidateRequestParameters: false
 
+    # Elasticsearch cluster configuration
+    ELKCluster:
+      Type: AWS::Elasticsearch::Domain
+      Properties:
+        ElasticsearchVersion: '7.7'
+        DomainName: images-search-v2-${self:provider.stage}
+        ElasticsearchClusterConfig:
+          DedicatedMasterEnabled: false
+          InstanceCount: '1'
+          ZoneAwarenessEnabled: false
+          InstanceType: t3.small.elasticsearch
+        EBSOptions:
+          EBSEnabled: true
+          Iops: 0
+          VolumeSize: 10
+          VolumeType: 'gp2'
+        AccessPolicies: !Sub |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "AWS": "*"
+                },
+                "Action": "es:*",
+                "Resource": "*"
+              }
+            ]
+          }
+        AdvancedSecurityOptions:
+            Enabled: true
+            InternalUserDatabaseEnabled: true
+            MasterUserOptions: 
+              MasterUserName: admin
+              MasterUserPassword: Admin12345*
+        EncryptionAtRestOptions: 
+          Enabled: true
+        NodeToNodeEncryptionOptions:
+          Enabled: true
+        DomainEndpointOptions:
+          EnforceHTTPS: true
