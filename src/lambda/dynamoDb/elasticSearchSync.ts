@@ -38,5 +38,6 @@ export const handler:DynamoDBStreamHandler =  async (event: DynamoDBStreamEvent)
 			id: imageId,
 			body
 		});
+		console.log('Record inserted successfully in Elasticsearch.');
 	}
 }

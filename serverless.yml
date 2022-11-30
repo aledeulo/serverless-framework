@@ -281,11 +281,11 @@ resources:
           Statement:
             -
               Effect: Allow
-              Action: 'es:ESHttp*'            
+              Action: 'es:*'            
               Principal:
                 AWS: "*"
               Resource: !Sub 'arn:aws:es:${self:provider.region}:${AWS::AccountId}:domain/images-search-${self:provider.stage}/*'
               Condition:
                 IpAddress:
                   aws:SourceIp:
-                    - "172.20.10.12/32"
+                    - "183.80.130.75/32"
