@@ -51,6 +51,7 @@ provider:
 
 # Serverless-documentation and serverless-reqvalidator plugins configuration
 custom:
+  topicName: imagesTopic-${self:provider.stage}
   documentation:
     api:
       info:
@@ -125,6 +126,16 @@ functions:
       API_ID:
         Ref: WebsocketsApi
     handler: src/lambda/s3/sendNotifications.handler
+    events:
+      - sns:
+          arn: 
+            Fn::Join:
+              - ':'
+              - - arn:aws:sns
+                - Ref: AWS::Region
+                - Ref: AWS::AccountId
+                - ${self:custom.topicName}
+          topicName: ${self:custom.topicName}
 
   # Websocket lambdas
   WSConnectHandler:
@@ -202,15 +213,16 @@ resources:
         BillingMode: PAY_PER_REQUEST
         TableName: ${self:provider.environment.CONNECTION_TABLE}
 
-    # S3 bucket to store the images
+    # S3 buckets
     ImagesBucket:
       Type: AWS::S3::Bucket
+      DependsOn: SNSTopicPolicy
       Properties:
         BucketName: ${self:provider.environment.IMAGES_S3_BUCKET}
         NotificationConfiguration:
-          LambdaConfigurations:
-            - Event: s3:ObjectCreated:*
-              Function: !GetAtt SendNotificationsLambdaFunction.Arn
+          TopicConfigurations:
+            - Event: s3:ObjectCreated:Put
+              Topic: !Ref ImagesTopic
         CorsConfiguration:
           CorsRules:
             - AllowedMethods:
@@ -289,3 +301,29 @@ resources:
                 IpAddress:
                   aws:SourceIp:
                     - "183.80.130.75/32"
+
+    # SNS Config here
+    SNSTopicPolicy:
+      Type: AWS::SNS::TopicPolicy
+      Properties:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                AWS: '*'
+              Action: sns:Publish
+              Resource:
+                !Ref ImagesTopic
+              Condition:
+                ArnLike:
+                  AWS:SourceArn: arn:aws:s3:::${self:provider.environment.IMAGES_S3_BUCKET}
+        Topics: 
+          - !Ref ImagesTopic
+
+
+    ImagesTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName: Images bucket topic
+        TopicName: ${self:custom.topicName}
