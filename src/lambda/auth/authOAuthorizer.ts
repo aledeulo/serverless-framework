@@ -2,13 +2,17 @@ import { CustomAuthorizerEvent, CustomAuthorizerResult, CustomAuthorizerHandler 
 import 'source-map-support/register';
 import { verify } from "jsonwebtoken";
 import { JwtToken } from "../../auth/JwtToken";
+import  * as AWS from "aws-sdk";
 
-const secret = process.env.AUTH_0_SECRET;
+const client = new AWS.SecretsManager();
+const secretId = process.env.AUTH_0_SECRET_ID;
+const secretField = process.env.AUTH_0_SECRET_FIELD;
+let cachedSecret:string;
 
 export const handler:CustomAuthorizerHandler =async (event:CustomAuthorizerEvent):Promise<CustomAuthorizerResult> => {
 	console.log('handler: Received authorization request: ', JSON.stringify(event));
 	try {
-		const decodedToken: JwtToken = verifyToken(event.authorizationToken);
+		const decodedToken: JwtToken = await verifyToken(event.authorizationToken);
 		console.log('handler: Request verified successfully');
 		return {
 			principalId: decodedToken.sub,
@@ -41,7 +45,7 @@ export const handler:CustomAuthorizerHandler =async (event:CustomAuthorizerEvent
 	};
 }
 
-function verifyToken(authHeader: string): JwtToken{
+async function verifyToken(authHeader: string): Promise<JwtToken>{
 	if (!authHeader) {
 		throw new Error("verifyToken: No authorization header");
 	}
@@ -53,5 +57,27 @@ function verifyToken(authHeader: string): JwtToken{
 
 	const split = authHeader.split(' ');
 	const token = split[1];
+	const secretObject:any = getSecret();
+	const secret = await secretObject[secretField];
+	console.log('verifyToken: Secret has been successfully fetched from SSM: %s', secret);
+
 	return verify(token, secret) as JwtToken;
+}
+
+async function getSecret() {
+	if (cachedSecret) {
+		console.log('getSecret: Secret is returned from cached value');
+		return cachedSecret;
+	}
+
+	try {
+		const data = await client.getSecretValue({
+			SecretId: secretId
+		}).promise();
+		console.log('getSecret: Fetched secret from SSM');
+		cachedSecret = data.SecretString;
+		return JSON.parse(cachedSecret);
+	} catch (error) {
+		throw new Error("getSecret: Failed to fetch the secret from SSM. Error: " + error.message);		
+	}
 }
