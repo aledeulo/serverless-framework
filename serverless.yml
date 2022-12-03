@@ -22,7 +22,6 @@ provider:
     SIGNED_URL_EXPIRATION: 300
     AUTH_0_SECRET_ID: Auth0Secret-${self:provider.stage}
     AUTH_0_SECRET_FIELD: auth0Secret
-    # AUTH_0_SECRET: 4Lr0FVzbV4zr9gvq46q4OGeG5oRZmAwHS3nw0FjZfAr7JwJqsERSow5jbyUSyYPJ
 
   iamRoleStatements:
     - Effect: Allow
@@ -413,3 +412,4 @@ resources:
         Name: ${self:provider.environment.AUTH_0_SECRET_ID}
         Description: Auth0 secret for auth
         KmsKeyId: !Ref KMSKey
+        SecretString: '{"auth0Secret": "12345"}'

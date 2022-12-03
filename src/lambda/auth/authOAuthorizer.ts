@@ -51,20 +51,24 @@ async function verifyToken(authHeader: string): Promise<JwtToken>{
 	}
 
 	if (!authHeader.toLocaleLowerCase().startsWith('bearer')) {
-		throw new Error("verifyToken: Invalid authorization token");
-		
+		throw new Error("verifyToken: Invalid authorization token");		
 	}
 
-	const split = authHeader.split(' ');
-	const token = split[1];
-	const secretObject:any = getSecret();
-	const secret = await secretObject[secretField];
-	console.log('verifyToken: Secret has been successfully fetched from SSM: %s', secret);
-
-	return verify(token, secret) as JwtToken;
+	try {
+		const split = authHeader.split(' ');
+		const token = split[1];
+		console.log('verifyToken: Received token');
+		const secretObject:any = await getSecret();
+		const secret = secretObject[secretField];
+		console.log('verifyToken: Secret has been successfully fetched from SSM');
+		return verify(token, secret) as JwtToken;
+	} catch (error) {
+		throw new Error("verifyToken: Failed to fetch the secret from SSM. Error: " + error.message);	
+	}
 }
 
 async function getSecret() {
+	console.log('getSecret: Trying to access to ssm with id: %s', secretId);
 	if (cachedSecret) {
 		console.log('getSecret: Secret is returned from cached value');
 		return cachedSecret;
@@ -76,6 +80,7 @@ async function getSecret() {
 		}).promise();
 		console.log('getSecret: Fetched secret from SSM');
 		cachedSecret = data.SecretString;
+		console.log('getSecret: Extracted data from secret');
 		return JSON.parse(cachedSecret);
 	} catch (error) {
 		throw new Error("getSecret: Failed to fetch the secret from SSM. Error: " + error.message);		
