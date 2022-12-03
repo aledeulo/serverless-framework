@@ -20,6 +20,8 @@ provider:
     IMAGES_S3_BUCKET: uda-images-bucket-${self:provider.stage}
     THUMBNAILS_S3_BUCKET: uda-thumbnails-bucket-${self:provider.stage}
     SIGNED_URL_EXPIRATION: 300
+    AUTH_0_SECRET_ID: Auth0Secret-${self:provider.stage}
+    AUTH_0_SECRET_FIELD: auth0Secret
 
   iamRoleStatements:
     - Effect: Allow
@@ -52,6 +54,14 @@ provider:
         - dynamodb:PutItem
         - dynamodb:DeleteItem
       Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.CONNECTION_TABLE}
+    - Effect: Allow
+      Action: 
+       - secretsmanager:GetSecretValue
+      Resource: !Ref Auth0Secret
+    - Effect: Allow
+      Action:
+        - kms:Decrypt
+      Resource: !GetAtt KMSKey.Arn
       
 
 # Serverless-documentation and serverless-reqvalidator plugins configuration
@@ -72,6 +82,9 @@ custom:
         schema: ${file(models/create-image-request.json)}
 
 functions:
+  Auth:
+    handler: src/lambda/auth/authOAuthorizer.handler
+
   GetGroups:
     handler: src/lambda/http/getGroups.handler
     events:
@@ -87,6 +100,7 @@ functions:
           method: post
           path: groups
           cors: true
+          authorizer: Auth
           reqValidatorName: RequestBodyValidator
           documentation:
             summary: Create a new group
@@ -117,6 +131,7 @@ functions:
           method: post
           path: groups/{groupId}/images
           cors: true
+          authorizer: Auth
           reqValidatorName: RequestBodyValidator
           documentation:
             summary: Create a new image
@@ -168,17 +183,29 @@ functions:
       - websocket:
           route: $disconnect
 
-  SyncDynamoDBImagesELK:
-    environment:
-      ES_ENDPOINT: !GetAtt ELKCluster.DomainEndpoint
-    handler: src/lambda/dynamoDb/elasticSearchSync.handler
-    events:
-      - stream:
-          type: dynamodb
-          arn: !GetAtt ImagesDynamoDBTable.StreamArn
+  # SyncDynamoDBImagesELK:
+  #   environment:
+  #     ES_ENDPOINT: !GetAtt ELKCluster.DomainEndpoint
+  #   handler: src/lambda/dynamoDb/elasticSearchSync.handler
+  #   events:
+  #     - stream:
+  #         type: dynamodb
+  #         arn: !GetAtt ImagesDynamoDBTable.StreamArn
 
 resources:
   Resources:
+    # Gateway response CORS config if the auth fails
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origins: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Z-Amz-Date,Authorization'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+        ResponseType: DEFAULT_4XX
+        RestApiId: 
+          Ref: ApiGatewayRestApi
+    
     # DynamoDB tables
     GroupsDynamoDBTable:
       Type: AWS::DynamoDB::Table
@@ -291,34 +318,34 @@ resources:
         ValidateRequestParameters: false
 
     # Elasticsearch cluster configuration
-    ELKCluster:
-      Type: AWS::Elasticsearch::Domain
-      Properties:
-        ElasticsearchVersion: '6.3'
-        DomainName: images-search-${self:provider.stage}
-        ElasticsearchClusterConfig:
-          DedicatedMasterEnabled: false
-          InstanceCount: '1'
-          ZoneAwarenessEnabled: false
-          InstanceType: t2.small.elasticsearch
-        EBSOptions:
-          EBSEnabled: true
-          Iops: 0
-          VolumeSize: 10
-          VolumeType: 'gp2'
-        AccessPolicies:
-          Version: '2012-10-17'
-          Statement:
-            -
-              Effect: Allow
-              Action: 'es:*'            
-              Principal:
-                AWS: "*"
-              Resource: !Sub 'arn:aws:es:${self:provider.region}:${AWS::AccountId}:domain/images-search-${self:provider.stage}/*'
-              Condition:
-                IpAddress:
-                  aws:SourceIp:
-                    - "183.80.130.75/32"
+    # ELKCluster:
+    #   Type: AWS::Elasticsearch::Domain
+    #   Properties:
+    #     ElasticsearchVersion: '6.3'
+    #     DomainName: images-search-${self:provider.stage}
+    #     ElasticsearchClusterConfig:
+    #       DedicatedMasterEnabled: false
+    #       InstanceCount: '1'
+    #       ZoneAwarenessEnabled: false
+    #       InstanceType: t2.small.elasticsearch
+    #     EBSOptions:
+    #       EBSEnabled: true
+    #       Iops: 0
+    #       VolumeSize: 10
+    #       VolumeType: 'gp2'
+    #     AccessPolicies:
+    #       Version: '2012-10-17'
+    #       Statement:
+    #         -
+    #           Effect: Allow
+    #           Action: 'es:*'            
+    #           Principal:
+    #             AWS: "*"
+    #           Resource: !Sub 'arn:aws:es:${self:provider.region}:${AWS::AccountId}:domain/images-search-${self:provider.stage}/*'
+    #           Condition:
+    #             IpAddress:
+    #               aws:SourceIp:
+    #                 - "183.80.130.75/32"
 
     # SNS Config here
     SNSTopicPolicy:
@@ -350,3 +377,39 @@ resources:
       Type: AWS::S3::Bucket
       Properties:
         BucketName: ${self:provider.environment.THUMBNAILS_S3_BUCKET}
+
+    # SSM and Key management
+    KMSKey:
+      Type: AWS::KMS::Key
+      Properties:
+        Description: KMS key for auth0
+        KeyPolicy: 
+          Version: '2012-10-17'
+          Id: key-default-1
+          Statement:
+            - Sid: Allow admin of the key
+              Effect: Allow
+              Principal:
+                AWS: 
+                  Fn::Join:
+                  - ':'
+                  - - 'arn:aws:iam:'
+                    - Ref: AWS::AccountId
+                    - 'root'
+              Action:
+                - 'kms:*'
+              Resource: '*'
+
+    KMSAlias:
+      Type: AWS::KMS::Alias
+      Properties:
+        AliasName: alias/auth0Key-${self:provider.stage}
+        TargetKeyId: !Ref KMSKey
+
+    Auth0Secret:
+      Type: AWS::SecretsManager::Secret
+      Properties:
+        Name: ${self:provider.environment.AUTH_0_SECRET_ID}
+        Description: Auth0 secret for auth
+        KmsKeyId: !Ref KMSKey
+        SecretString: '{"auth0Secret": "12345"}'
