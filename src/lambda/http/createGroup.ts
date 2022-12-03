@@ -2,25 +2,31 @@ import { APIGatewayProxyHandler, APIGatewayProxyEvent, APIGatewayProxyResult } f
 import 'source-map-support/register'
 import * as AWS  from 'aws-sdk'
 import * as uuid from 'uuid'
+import {getUserId } from "../../auth/utils";
 
 const docClient = new AWS.DynamoDB.DocumentClient()
-const groupsTable = process.env.GROUPS_TABLE
+const groupsTable = process.env.GROUPS_TABLE;
 
 export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  console.log('Processing event: ', event)
-  const itemId = uuid.v4()
+  console.log('Processing event: ', event);
+  const itemId = uuid.v4();
 
   const parsedBody = JSON.parse(event.body)
+  const authHeader = event.headers.Authorization;
+  const split = authHeader.split(' ');
+  const token = split[1];
+  const userId:string = getUserId(token);
 
   const newItem = {
     id: itemId,
+    userId,
     ...parsedBody
-  }
+  };
 
   await docClient.put({
     TableName: groupsTable,
     Item: newItem
-  }).promise()
+  }).promise();
 
   return {
     statusCode: 201,
@@ -30,5 +36,5 @@ export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEven
     body: JSON.stringify({
       newItem
     })
-  }
+  };
 }

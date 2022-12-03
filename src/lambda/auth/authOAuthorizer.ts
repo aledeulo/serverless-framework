@@ -1,18 +1,23 @@
-import { CustomAuthorizerEvent, CustomAuthorizerResult, CustomAuthorizerHandler } from "aws-lambda";
+import { CustomAuthorizerEvent, CustomAuthorizerResult } from "aws-lambda";
 import 'source-map-support/register';
 import { verify } from "jsonwebtoken";
 import { JwtToken } from "../../auth/JwtToken";
-import  * as AWS from "aws-sdk";
+// import  * as AWS from "aws-sdk";
+import * as middy from "middy";
+import {secretsManager} from 'middy/middlewares'
 
-const client = new AWS.SecretsManager();
+// const client = new AWS.SecretsManager();
 const secretId = process.env.AUTH_0_SECRET_ID;
 const secretField = process.env.AUTH_0_SECRET_FIELD;
-let cachedSecret:string;
+// let cachedSecret:string;
 
-export const handler:CustomAuthorizerHandler =async (event:CustomAuthorizerEvent):Promise<CustomAuthorizerResult> => {
+export const handler = middy(async (event:CustomAuthorizerEvent, context):Promise<CustomAuthorizerResult> => {
 	console.log('handler: Received authorization request: ', JSON.stringify(event));
 	try {
-		const decodedToken: JwtToken = await verifyToken(event.authorizationToken);
+		const decodedToken: JwtToken = verifyToken(
+			event.authorizationToken,
+			context.AUTH0_SECRET[secretField]
+			);
 		console.log('handler: Request verified successfully');
 		return {
 			principalId: decodedToken.sub,
@@ -43,9 +48,9 @@ export const handler:CustomAuthorizerHandler =async (event:CustomAuthorizerEvent
 			]
 		}
 	};
-}
+});
 
-async function verifyToken(authHeader: string): Promise<JwtToken>{
+function verifyToken(authHeader: string, secret: string): JwtToken {
 	if (!authHeader) {
 		throw new Error("verifyToken: No authorization header");
 	}
@@ -57,32 +62,43 @@ async function verifyToken(authHeader: string): Promise<JwtToken>{
 	try {
 		const split = authHeader.split(' ');
 		const token = split[1];
-		console.log('verifyToken: Received token');
-		const secretObject:any = await getSecret();
-		const secret = secretObject[secretField];
-		console.log('verifyToken: Secret has been successfully fetched from SSM');
+		// console.log('verifyToken: Received token');
+		// const secretObject:any = await getSecret();
+		// const secret = secretObject[secretField];
+		// console.log('verifyToken: Secret has been successfully fetched from SSM');
 		return verify(token, secret) as JwtToken;
 	} catch (error) {
 		throw new Error("verifyToken: Failed to fetch the secret from SSM. Error: " + error.message);	
 	}
 }
 
-async function getSecret() {
-	console.log('getSecret: Trying to access to ssm with id: %s', secretId);
-	if (cachedSecret) {
-		console.log('getSecret: Secret is returned from cached value');
-		return cachedSecret;
-	}
+handler.use(
+	secretsManager({
+		cache: true,
+		cacheExpireInMillis: 60000,
+		throwOnFailedCall: true,
+		secrets: {
+			AUTH0_SECRET: secretId
+		}
+	})
+);
 
-	try {
-		const data = await client.getSecretValue({
-			SecretId: secretId
-		}).promise();
-		console.log('getSecret: Fetched secret from SSM');
-		cachedSecret = data.SecretString;
-		console.log('getSecret: Extracted data from secret');
-		return JSON.parse(cachedSecret);
-	} catch (error) {
-		throw new Error("getSecret: Failed to fetch the secret from SSM. Error: " + error.message);		
-	}
-}
+// async function getSecret() {
+// 	console.log('getSecret: Trying to access to ssm with id: %s', secretId);
+// 	if (cachedSecret) {
+// 		console.log('getSecret: Secret is returned from cached value');
+// 		return cachedSecret;
+// 	}
+
+// 	try {
+// 		const data = await client.getSecretValue({
+// 			SecretId: secretId
+// 		}).promise();
+// 		console.log('getSecret: Fetched secret from SSM');
+// 		cachedSecret = data.SecretString;
+// 		console.log('getSecret: Extracted data from secret');
+// 		return JSON.parse(cachedSecret);
+// 	} catch (error) {
+// 		throw new Error("getSecret: Failed to fetch the secret from SSM. Error: " + error.message);		
+// 	}
+// }
